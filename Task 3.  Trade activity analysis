@@ -1,0 +1,281 @@
+3. Блок анализа активности торгов
+a. Загрузка данных из файловой системы.
+b. Статистический анализ активности торгов.
+c. Вывод табличной и графической информации.
+d. Экспорт данных в файловую систему.
+Технические требования:
+a. Исходные данные по выбору пользователя могут быть получены из БД, из файловой системы в формате, отвечающем таблицам БД, или из рабочей области программы.
+b. Для заданной пользователем облигации проводится анализ качества рыночной информации; в анализе используются информация о режиме основных торгов Московской биржи. Определяется продолжительность периода данных; доля торговых дней без сделок; среднее/медианное число сделок (0 не учитывать); доля дней, когда хотя бы одна из котировок BID/ASK отсутствует или равна нулю; средний/медианных объем на стороне спроса; средний/медианных объем на стороне предложения; средний/медианный BID-ASK спред.
+c. Для показателей [количество сделок, BID-ASK спред, объем на стороне спроса; объем на стороне предложения] выводятся графики динамики.
+d. Пользователь имеет возможность экспортировать результаты в файловую систему в общепринятых форматах (например, csv, xls, txt, png).
+
+Предлагаем пользователю ввести ISIN интересующей его облигации.
+
+ISIN_part_3=input("Введите ISIN интересуемой облигации и нажмите Enter: ")
+Введите ISIN интересуемой облигации и нажмите Enter: RU000A0JNFZ4
+
+1.	Загрузка данных из файловой системы. Выгрузим данные о результатах торгов по интересующей нас облигации из базы данных с помощью sql запросов.
+
+import pandas as pd
+base_prices_isin = pd.read_sql_query("SELECT * FROM base_prices where ISIN = %s;", conn, params = [ISIN_part_3])
+
+Данные в столбце TIME содержат целочисленные заначения (формат в excel, где все даты можно перевести в числа и числу 1 будет соответствовать 01.01.1900). Переводим данный столбец в формат даты.
+
+from datetime import datetime
+
+temp_df = datetime(1900, 1, 1).toordinal() + base_prices_isin['time'].astype(int) - 2 
+for i in range(0, len(temp_df)):
+    temp_df.iloc[i] = datetime.fromordinal(temp_df.iloc[i])
+    
+base_prices_isin['datetime'] = temp_df
+
+for i in range(0, len(temp_df)):
+    temp_df.iloc[i] = (temp_df.iloc[i]).date()
+
+base_prices_isin['timetuple'] = temp_df
+
+2.	Статистический анализ активности торгов. Определим продолжительность периода данных
+
+str(len(base_prices_isin['datetime'])) + " торговых дней"
+Out:
+'739 торговых дней'
+
+str(max(base_prices_isin['datetime'])-min(base_prices_isin['datetime'])) + " календарных дней"
+Out:
+'1087 days, 0:00:00 календарных дней'
+
+Отберем только данные за дни, когда торги были, и определим долю дней, когда торгов не было.
+
+base_prices_isin_with_deals=base_prices_isin.dropna(subset=['deal_acc'])
+base_prices_isin_with_deals=base_prices_isin_with_deals[base_prices_isin_with_deals['deal_acc']>0]
+1-len(base_prices_isin_with_deals)/len(base_prices_isin)
+Out:
+0.9137007185020436
+
+Выведем среднее и медианное значение числа сделок в день за дни, когда торги были.
+
+base_prices_isin_with_deals['deal_acc'].describe()
+Out:
+count    76.000000
+mean      8.995081
+std       3.125641
+min       1.000000
+25%      10.000000
+50%      10.000000
+75%      10.000000
+max      20.000000
+Name: deal_acc, dtype: float64
+
+Отберем только данные за дни, когда были котировки и бид, и аск. Посчитаем долю дней, когда нет данных хотя бы по одной из котировок.
+base_prices_isin_with_bid_and_ask = base_prices_isin.dropna(subset=['ask', 'bid'])
+base_prices_isin_with_bid_and_ask = base_prices_isin_with_bid_and_ask[(base_prices_isin_with_bid_and_ask['ask']>0) & (base_prices_isin_with_bid_and_ask['bid']>0)]
+1-len(base_prices_isin_with_bid_and_ask)/len(base_prices_isin)
+Out:
+0.9371600639102164
+
+Найдем средний и медианный объем на стороне спроса за день.
+
+base_prices_isin_demand_vol = base_prices_isin.dropna(subset=['bid_size_total'])
+base_prices_isin_demand_vol['bid_size_total'].describe()
+Out:
+count      724.000000
+mean     32452.045431
+std      12733.447732
+min          0.000000
+25%       6763.000000
+50%      29510.000000
+75%      41000.000000
+max      65400.000000
+Name: bid_size_total, dtype: float64
+
+Найдем средний и медианный объем на стороне предложения за день.
+
+base_prices_isin_supply_vol = base_prices_isin.dropna(subset=['ask_size_total'])
+base_prices_isin_supply_vol['ask_size_total'].describe()
+Out:
+count       23.000000
+mean      1544.342189
+std       4930.067566
+min          0.000000
+25%         27.500000
+50%         29.000000
+75%         29.000000
+max      25000.000000
+Name: ask_size_total, dtype: float64
+Найдем средний и медианный BID-ASK спред.
+
+base_prices_isin_with_bid_and_ask.dropna(subset=['spread']).spread.describe()
+Out:
+count    61.000000
+mean      2.257474
+std       3.224352
+min       0.010000
+25%       0.450000
+50%       1.240000
+75%       1.350000
+max      17.980000
+Name: spread, dtype: float64
+
+1.	Построение графиков.
+Построение графика динамики числа сделок в день.
+
+import matplotlib.pyplot as plt
+deals_dynamics = base_prices_isin.dropna(subset=['deal_acc']).sort_values('timetuple')
+
+plt.figure(num=None, figsize=(10, 10), facecolor='w')
+plt.plot(deals_dynamics.timetuple, deals_dynamics.deal_acc)
+
+plt.xlabel("Time", fontsize=12)
+plt.ylabel("Number of Deals", fontsize=12)
+plt.title('Number of Deals Dynamics in Time for Bond '+ ISIN_part_3, fontsize=12)
+
+plt.show()
+
+Построение графика динамики бид-аск спрэда.
+
+import matplotlib.pyplot as plt
+spread_dynamics = base_prices_isin_with_bid_and_ask.dropna(subset=['spread']).sort_values('timetuple')
+
+plt.figure(num=None, figsize=(10, 10), facecolor='w')
+plt.plot(spread_dynamics.timetuple, spread_dynamics.spread)
+
+plt.xlabel("Time", fontsize=12)
+plt.ylabel("Spread", fontsize=12)
+plt.title('Spread Dynamics in Time for Bond '+ ISIN_part_3, fontsize=12)
+
+plt.show()
+
+Построение графика динамики объема спроса.
+
+import matplotlib.pyplot as plt
+demand_vol = base_prices_isin_demand_vol.sort_values('timetuple')
+
+plt.figure(num=None, figsize=(10, 10), facecolor='w')
+plt.plot(demand_vol.timetuple, demand_vol.bid_size_total)
+
+plt.xlabel("Time", fontsize=12)
+plt.ylabel("Volume of Demand", fontsize=12)
+plt.title('Demand Volume Dynamics in Time for Bond '+ ISIN_part_3, fontsize=12)
+
+plt.show()
+
+Построение графика динамики объема предложения.
+
+import matplotlib.pyplot as plt
+supply_vol = base_prices_isin_supply_vol.sort_values('timetuple')
+
+plt.figure(num=None, figsize=(10, 10), facecolor='w')
+plt.plot(supply_vol.timetuple, supply_vol.ask_size_total)
+
+plt.xlabel("Time", fontsize=12)
+plt.ylabel("Volume of Supply", fontsize=12)
+plt.title('Supply Volume Dynamics in Time for Bond '+ ISIN_part_3, fontsize=12)
+
+plt.show()
+
+3.	Экспорт результатов.
+Предлагаем пользователю выгрузить график с динамикой числа сделок по облигации. Предлагаем пользователя ввести название графика и директорию, куда он хочет его выгрузить в формате png. Если пользователь не захочет придумывать свое название графика и свою директорию, то он должен просто нажать ENTER, ничего не вводя.
+
+ImageTitleDeals=input("Введите название графика (или будет использоваться название по умолчанию): ")
+ImagePathDeals = input("Введите директорию, где Вы хотите, чтобы график был сохранен. Пример: C:\Anaconda3\Scripts")
+Введите название графика (или будет использоваться название по умолчанию): 
+Введите директорию, где Вы хотите, чтобы график был сохранен. Пример: C:\Anaconda3\Scripts
+Задаем название графика и директорию по умолчанию (применяются, если пользователь не придумает свои)
+
+if ImageTitleDeals == "":
+    ImageTitleDeals = 'Динамика_количества_сделок_'+ISIN_part_3
+
+if ImagePathDeals == "":
+    ImagePathDeals = "C:\Anaconda3\Scripts"
+
+Выгружаем график. Смотрим в директории график с выбранным названием, если оно было выбрано, или с названием по умолчанию.
+
+deals_dynamics = base_prices_isin.dropna(subset=['deal_acc']).sort_values('timetuple')
+
+plt.figure(num=None, figsize=(10, 10), facecolor='w')
+plt.plot(deals_dynamics.timetuple, deals_dynamics.deal_acc)
+
+plt.xlabel("Time", fontsize=12)
+plt.ylabel("Number of Deals", fontsize=12)
+plt.title('Number of Deals Dynamics in Time for Bond '+ ISIN_part_3, fontsize=12)
+plt.savefig(ImagePathDeals+'\\'+ImageTitleDeals+'.png', bbox_inches='tight')
+
+Предлагаем пользователю выгрузить график с динамикой bid-ask спрэда по облигации. Предлагаем пользователя ввести название графика и директорию, куда он хочет его выгрузить в формате png. Если пользователь не захочет придумывать свое название графика и свою директорию, то он должен просто нажать ENTER, ничего не вводя.
+
+ImageTitleSpread=input("Введите название графика (или будет использоваться название по умолчанию): ")
+ImagePathSpread = input("Введите директорию, где Вы хотите, чтобы график был сохранен. Пример: C:\Anaconda3\Scripts")
+Введите название графика (или будет использоваться название по умолчанию): 
+Введите директорию, где Вы хотите, чтобы график был сохранен. Пример: C:\Anaconda3\Scripts
+Задаем название графика и директорию по умолчанию (применяются, если пользователь не придумает свои)
+
+if ImageTitleSpread == "":
+    ImageTitleSpread = 'Динамика_bid-ask_спрэда_'+ISIN_part_3
+
+if ImagePathSpread == "":
+    ImagePathSpread = "C:\Anaconda3\Scripts"
+
+Выгружаем график. Смотрим в директории график с выбранным названием, если оно было выбрано, или с названием по умолчанию.
+
+import matplotlib.pyplot as plt
+spread_dynamics = base_prices_isin_with_bid_and_ask.dropna(subset=['spread']).sort_values('timetuple')
+
+plt.figure(num=None, figsize=(10, 10), facecolor='w')
+plt.plot(spread_dynamics.timetuple, spread_dynamics.spread)
+
+plt.xlabel("Time", fontsize=12)
+plt.ylabel("Spread", fontsize=12)
+plt.title('Spread Dynamics in Time for Bond '+ ISIN_part_3, fontsize=12)
+plt.savefig(ImagePathSpread+'\\'+ImageTitleSpread+'.png', bbox_inches='tight')
+
+Предлагаем пользователю выгрузить график с динамикой объема на стороне спроса по облигации. Предлагаем пользователя ввести название графика и директорию, куда он хочет его выгрузить в формате png. Если пользователь не захочет придумывать свое название графика и свою директорию, то он должен просто нажать ENTER, ничего не вводя.
+
+ImageTitleDemand=input("Введите название графика (или будет использоваться название по умолчанию): ")
+ImagePathDemand = input("Введите директорию, где Вы хотите, чтобы график был сохранен. Пример: C:\Anaconda3\Scripts")
+Введите название графика (или будет использоваться название по умолчанию): 
+Введите директорию, где Вы хотите, чтобы график был сохранен. Пример: C:\Anaconda3\Scripts
+Задаем название графика и директорию по умолчанию (применяются, если пользователь не придумает свои)
+
+if ImageTitleDemand == "":
+    ImageTitleDemand = 'Динамика_объема_спроса_'+ISIN_part_3
+
+if ImagePathDemand == "":
+    ImagePathDemand = "C:\Anaconda3\Scripts"
+Выгружаем график. Смотрим в директории график с выбранным названием, если оно было выбрано, или с названием по умолчанию.
+
+import matplotlib.pyplot as plt
+demand_vol = base_prices_isin_demand_vol.sort_values('timetuple')
+
+plt.figure(num=None, figsize=(10, 10), facecolor='w')
+plt.plot(demand_vol.timetuple, demand_vol.bid_size_total)
+
+plt.xlabel("Time", fontsize=12)
+plt.ylabel("Volume of Demand", fontsize=12)
+plt.title('Demand Volume Dynamics in Time for Bond '+ ISIN_part_3, fontsize=12)
+plt.savefig(ImagePathDemand+'\\'+ImageTitleDemand+'.png', bbox_inches='tight')
+
+Предлагаем пользователю выгрузить график с динамикой объема на стороне предложения по облигации. Предлагаем пользователя ввести название графика и директорию, куда он хочет его выгрузить в формате png. Если пользователь не захочет придумывать свое название графика и свою директорию, то он должен просто нажать ENTER, ничего не вводя.
+
+ImageTitleSupply=input("Введите название графика (или будет использоваться название по умолчанию): ")
+ImagePathSupply = input("Введите директорию, где Вы хотите, чтобы график был сохранен. Пример: C:\Anaconda3\Scripts")
+Введите название графика (или будет использоваться название по умолчанию): 
+Введите директорию, где Вы хотите, чтобы график был сохранен. Пример: C:\Anaconda3\Scripts
+Задаем название графика и директорию по умолчанию (применяются, если пользователь не придумает свои)
+
+if ImageTitleSupply == "":
+    ImageTitleSupply = 'Динамика_объемов_предложения_'+ISIN_part_3
+
+if ImagePathSupply == "":
+    ImagePathSupply = "C:\Anaconda3\Scripts"
+Выгружаем график. Смотрим в директории график с выбранным названием, если оно было выбрано, или с названием по умолчанию.
+
+import matplotlib.pyplot as plt
+supply_vol = base_prices_isin_supply_vol.sort_values('timetuple')
+
+plt.figure(num=None, figsize=(10, 10), facecolor='w')
+plt.plot(supply_vol.timetuple, supply_vol.ask_size_total)
+
+plt.xlabel("Time", fontsize=12)
+plt.ylabel("Volume of Supply", fontsize=12)
+plt.title('Supply Volume Dynamics in Time for Bond '+ ISIN_part_3, fontsize=12)
+plt.savefig(ImagePathSupply+'\\'+ImageTitleSupply+'.png', bbox_inches='tight')
+
