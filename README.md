@@ -23,3 +23,5 @@ pip install matplotlib
 pip install pandas
 
 До запуска кода важно поместить данные (файлы base_prices.xlsx, bond_description.xlsx, cbr_rates.xlsx) в одну папку с файлами c расширением .ipynb. Дальнейшие инструкции содержатся непосредственно в скриптах.
+
+Скачать базу и файлы можно по ссылке: https://drive.google.com/drive/folders/1KycKod6XbNi1PI3JanV4TaituU2IVcwO?usp=sharing
